@@ -18,7 +18,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 4000;
 
-ensureDb();
+await ensureDb();
 
 app.use(cors());
 app.use(express.json());
@@ -89,7 +89,7 @@ app.post('/api/auth/employee', (req, res) => {
     return res.status(400).json({ message: '이름과 학번을 모두 입력해주세요.' });
   }
 
-  const db = readDb();
+  const db = await readDb();
   const user = db.users.find((item) => item.studentId === studentId && item.role === 'employee');
 
   if (!user) {
@@ -104,23 +104,52 @@ app.post('/api/auth/employee', (req, res) => {
 });
 
 // 관리자 로그인: 관리자 페이지에서 수정한 계정 정보로 로그인한다.
-app.post('/api/auth/admin', (req, res) => {
-  const adminId = String(req.body.adminId || '').trim();
-  const password = String(req.body.password || '').trim();
-  const db = readDb();
+app.post('/api/auth/admin', async (req, res) => {
+  try {
+    const { adminId, password } = req.body;
 
-  if (adminId === db.settings.adminId && password === db.settings.adminPassword) {
-    const admin = db.users.find((user) => user.role === 'admin');
-    return res.json({ admin: sanitizeUser(admin), settings: sanitizeAdminSettings(db.settings) });
+    const db = await readDb();
+
+    if (!db.settings) {
+      return res.status(500).json({
+        ok: false,
+        message: '관리자 설정 정보를 불러오지 못했습니다.'
+      });
+    }
+
+    if (
+      adminId === db.settings.adminId &&
+      password === db.settings.adminPassword
+    ) {
+      return res.json({
+        ok: true,
+        admin: {
+          id: 'admin-user',
+          name: db.settings.adminName,
+          role: 'admin'
+        }
+      });
+    }
+
+    return res.status(401).json({
+      ok: false,
+      message: '관리자 ID 또는 비밀번호가 올바르지 않습니다.'
+    });
+  } catch (error) {
+    console.error('관리자 로그인 오류:', error);
+
+    return res.status(500).json({
+      ok: false,
+      message: '관리자 로그인 처리 중 오류가 발생했습니다.',
+      detail: error.message
+    });
   }
-
-  res.status(401).json({ message: '관리자 ID 또는 비밀번호가 올바르지 않습니다.' });
 });
 
 app.get('/api/employee/:userId/today', (req, res) => {
   const { userId } = req.params;
   const { date } = getKstNow();
-  const db = readDb();
+  const db = await readDb();
   const user = db.users.find((item) => item.id === userId && item.role === 'employee');
 
   if (!user) {
@@ -134,7 +163,7 @@ app.get('/api/employee/:userId/today', (req, res) => {
 // 출근 처리: 같은 날짜에 중복 출근을 막는다.
 app.post('/api/attendance/check-in', (req, res) => {
   const { userId } = req.body;
-  const db = readDb();
+  const db = await readDb();
   const user = db.users.find((item) => item.id === userId && item.role === 'employee');
 
   if (!user) {
@@ -161,14 +190,14 @@ app.post('/api/attendance/check-in', (req, res) => {
   };
 
   db.attendanceRecords.push(record);
-  writeDb(db);
+  await writeDb(db);
   res.json({ message: '출근 처리되었습니다.', record: enrichRecord(record, user, db.attendanceRecords) });
 });
 
 // 퇴근 처리: 출근 기록이 있을 때만 가능하며 근로시간을 자동 계산한다.
 app.post('/api/attendance/check-out', (req, res) => {
   const { userId } = req.body;
-  const db = readDb();
+  const db = await readDb();
   const user = db.users.find((item) => item.id === userId && item.role === 'employee');
 
   if (!user) {
@@ -189,7 +218,7 @@ app.post('/api/attendance/check-out', (req, res) => {
   if (!record.checkInTime) {
     record.status = 'incomplete';
     record.updatedAt = new Date().toISOString();
-    writeDb(db);
+    await writeDb(db);
     return res.status(400).json({ message: '출근 시간이 비정상적입니다.', record: enrichRecord(record, user, db.attendanceRecords) });
   }
 
@@ -201,7 +230,7 @@ app.post('/api/attendance/check-out', (req, res) => {
   record.status = 'checked-out';
   record.updatedAt = new Date().toISOString();
 
-  writeDb(db);
+  await writeDb(db);
   res.json({ message: '퇴근 처리되었습니다.', record: enrichRecord(record, user, db.attendanceRecords) });
 });
 
@@ -215,7 +244,7 @@ app.get('/api/employee/:userId/records', (req, res) => {
     return res.status(400).json({ message: 'year와 month 값을 올바르게 입력해주세요.' });
   }
 
-  const db = readDb();
+  const db = await readDb();
   const user = db.users.find((item) => item.id === userId && item.role === 'employee');
 
   if (!user) {
@@ -244,7 +273,7 @@ app.get('/api/employee/:userId/records', (req, res) => {
 app.get('/api/admin/records', (req, res) => {
   const query = String(req.query.query || '').trim().toLowerCase();
   const date = String(req.query.date || '').trim();
-  const db = readDb();
+  const db = await readDb();
 
   const employeeUsers = db.users.filter((user) => user.role === 'employee');
   const usersById = new Map(employeeUsers.map((user) => [user.id, user]));
@@ -275,7 +304,7 @@ app.get('/api/admin/records', (req, res) => {
 
 // 관리자 직원 목록 조회
 app.get('/api/admin/employees', (req, res) => {
-  const db = readDb();
+  const db = await readDb();
   const employees = db.users
     .filter((user) => user.role === 'employee')
     .sort((a, b) => a.name.localeCompare(b.name, 'ko-KR'))
@@ -295,7 +324,7 @@ app.post('/api/admin/employees', (req, res) => {
 
   if (error) return res.status(400).json({ message: error });
 
-  const db = readDb();
+  const db = await readDb();
   const exists = db.users.find((user) => user.studentId === studentId);
 
   if (exists) {
@@ -312,7 +341,7 @@ app.post('/api/admin/employees', (req, res) => {
   };
 
   db.users.push(employee);
-  writeDb(db);
+  await writeDb(db);
   res.status(201).json({ message: '직원이 등록되었습니다.', employee: sanitizeUser(employee) });
 });
 
@@ -325,7 +354,7 @@ app.put('/api/admin/employees/:id', (req, res) => {
 
   if (error) return res.status(400).json({ message: error });
 
-  const db = readDb();
+  const db = await readDb();
   const employee = db.users.find((user) => user.id === id && user.role === 'employee');
 
   if (!employee) {
@@ -341,14 +370,14 @@ app.put('/api/admin/employees/:id', (req, res) => {
   employee.studentId = studentId;
   employee.updatedAt = new Date().toISOString();
 
-  writeDb(db);
+  await writeDb(db);
   res.json({ message: '직원 정보가 수정되었습니다.', employee: sanitizeUser(employee) });
 });
 
 // 관리자 직원 삭제: 직원 계정과 해당 직원의 출퇴근 기록을 함께 삭제한다.
 app.delete('/api/admin/employees/:id', (req, res) => {
   const { id } = req.params;
-  const db = readDb();
+  const db = await readDb();
   const employee = db.users.find((user) => user.id === id && user.role === 'employee');
 
   if (!employee) {
@@ -358,13 +387,13 @@ app.delete('/api/admin/employees/:id', (req, res) => {
   db.users = db.users.filter((user) => user.id !== id);
   db.attendanceRecords = db.attendanceRecords.filter((record) => record.userId !== id);
 
-  writeDb(db);
+  await writeDb(db);
   res.json({ message: '직원과 해당 직원의 출퇴근 기록이 삭제되었습니다.' });
 });
 
 // 관리자 계정 설정 조회
 app.get('/api/admin/settings', (req, res) => {
-  const db = readDb();
+  const db = await readDb();
   res.json({ settings: sanitizeAdminSettings(db.settings) });
 });
 
@@ -378,7 +407,7 @@ app.put('/api/admin/settings', (req, res) => {
     return res.status(400).json({ message: '새 관리자 ID를 입력해주세요.' });
   }
 
-  const db = readDb();
+  const db = await readDb();
 
   if (currentPassword !== db.settings.adminPassword) {
     return res.status(401).json({ message: '현재 관리자 비밀번호가 올바르지 않습니다.' });
@@ -399,7 +428,7 @@ app.put('/api/admin/settings', (req, res) => {
     admin.updatedAt = new Date().toISOString();
   }
 
-  writeDb(db);
+  await writeDb(db);
   res.json({
     message: '관리자 계정 설정이 수정되었습니다. 다음 로그인부터 변경된 정보가 적용됩니다.',
     settings: sanitizeAdminSettings(db.settings),
