@@ -9,7 +9,7 @@ export default function AdminRecords() {
 
   const admin = useMemo(() => {
     try {
-      return JSON.parse(localStorage.getItem('currentAdmin'));
+      return JSON.parse(sessionStorage.getItem('currentAdmin'));
     } catch {
       return null;
     }
@@ -56,7 +56,7 @@ export default function AdminRecords() {
 
   return (
     <main className="page-shell">
-      <Header title="전체 출퇴근 기록" />
+      <Header title="전체 출퇴근 기록" homePath="/admin" />
 
       <section className="hero-card">
         <div>

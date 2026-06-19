@@ -56,7 +56,7 @@ export default function EmployeeRecords() {
 
   const employee = useMemo(() => {
     try {
-      return JSON.parse(localStorage.getItem('currentEmployee'));
+      return JSON.parse(sessionStorage.getItem('currentEmployee'));
     } catch {
       return null;
     }
@@ -150,7 +150,7 @@ export default function EmployeeRecords() {
 
   return (
     <main className="page-shell">
-      <Header title="출근 기록" />
+      <Header title="출근 기록" homePath="/employee" />
 
       <section className="hero-card">
         <div>

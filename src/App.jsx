@@ -7,13 +7,23 @@ import AdminDashboard from './pages/AdminDashboard.jsx';
 import AdminRecords from './pages/AdminRecords.jsx';
 
 function RequireEmployee({ children }) {
-  const employee = localStorage.getItem('currentEmployee');
-  return employee ? children : <Navigate to="/login" replace />;
+  const employee = sessionStorage.getItem('currentEmployee');
+
+  if (!employee) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return children;
 }
 
 function RequireAdmin({ children }) {
-  const admin = localStorage.getItem('currentAdmin');
-  return admin ? children : <Navigate to="/admin/login" replace />;
+  const admin = sessionStorage.getItem('currentAdmin');
+
+  if (!admin) {
+    return <Navigate to="/admin/login" replace />;
+  }
+
+  return children;
 }
 
 export default function App() {

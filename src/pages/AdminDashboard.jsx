@@ -8,7 +8,7 @@ export default function AdminDashboard() {
 
   const admin = useMemo(() => {
     try {
-      return JSON.parse(localStorage.getItem('currentAdmin'));
+      return JSON.parse(sessionStorage.getItem('currentAdmin'));
     } catch {
       return null;
     }
@@ -85,7 +85,7 @@ export default function AdminDashboard() {
   }, []);
 
   const handleLogout = () => {
-    localStorage.removeItem('currentAdmin');
+    sessionStorage.removeItem('currentAdmin');
     navigate('/admin/login');
   };
 
@@ -181,7 +181,7 @@ export default function AdminDashboard() {
 
   return (
     <main className="page-shell">
-      <Header title="관리자 페이지" />
+      <Header title="관리자 페이지" homePath="/admin" />
 
       <section className="hero-card">
         <div>

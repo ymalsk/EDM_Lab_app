@@ -16,7 +16,8 @@ export default function EmployeeLogin() {
 
     try {
       const data = await api.employeeLogin({ name, studentId });
-      localStorage.setItem('currentEmployee', JSON.stringify(data.user));
+      sessionStorage.setItem('currentEmployee', JSON.stringify(data.user));
+      sessionStorage.removeItem('currentAdmin');
       navigate('/employee');
     } catch (error) {
       setMessage(error.message);

@@ -16,7 +16,8 @@ export default function AdminLogin() {
 
     try {
       const data = await api.adminLogin({ adminId, password });
-      localStorage.setItem('currentAdmin', JSON.stringify(data.admin));
+      sessionStorage.setItem('currentAdmin', JSON.stringify(data.admin));
+      sessionStorage.removeItem('currentEmployee');
       navigate('/admin');
     } catch (error) {
       setMessage(error.message);
