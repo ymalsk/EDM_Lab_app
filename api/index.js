@@ -643,17 +643,12 @@ app.get('/api/admin/records', async (req, res) => {
     }
 
     records.sort((a, b) => {
-      if (a.date !== b.date) return b.date.localeCompare(a.date);
+      const bTime = new Date(b.checkInTime || 0).getTime();
+      const aTime = new Date(a.checkInTime || 0).getTime();
 
-      const nameCompare = a.employeeName.localeCompare(b.employeeName, 'ko-KR');
-      if (nameCompare !== 0) return nameCompare;
+      if (bTime !== aTime) return bTime - aTime;
 
-      const checkInCompare =
-        new Date(a.checkInTime || 0).getTime() - new Date(b.checkInTime || 0).getTime();
-
-      if (checkInCompare !== 0) return checkInCompare;
-
-      return Number(a.sessionOrder || 1) - Number(b.sessionOrder || 1);
+      return a.employeeName.localeCompare(b.employeeName, 'ko-KR');
     });
 
     return res.json({
@@ -661,6 +656,101 @@ app.get('/api/admin/records', async (req, res) => {
     });
   } catch (error) {
     return handleServerError(res, error, '관리자 기록 조회');
+  }
+});
+
+// 관리자 메인 직원별 오늘 근무 요약
+// 관리자 메인 직원별 오늘 근무 요약
+app.get('/api/admin/today-summary', async (req, res) => {
+  try {
+    const { date: today } = getKstNow();
+
+    const db = await readDb();
+
+    const changed = normalizeOpenRecordsForAllUsers(db, today);
+    if (changed) await writeDb(db);
+
+    const employeeUsers = db.users
+      .filter((user) => user.role === 'employee')
+      .sort((a, b) => a.name.localeCompare(b.name, 'ko-KR'));
+
+    const summaries = employeeUsers.map((user) => {
+      const todayRecords = db.attendanceRecords.filter(
+        (record) => record.userId === user.id && record.date === today
+      );
+
+      const weeklyMinutes = calculateWeeklyMinutes(
+        db.attendanceRecords,
+        user.id,
+        today
+      );
+
+      const dailyMinutes = todayRecords.reduce((sum, record) => {
+        return sum + (record.workDurationMinutes || 0);
+      }, 0);
+
+      const openRecord = db.attendanceRecords.find(
+        (record) =>
+          record.userId === user.id &&
+          record.status === 'checked-in' &&
+          !record.checkOutTime
+      );
+
+      let statusLabel = '출근 전';
+
+      if (openRecord) {
+        statusLabel = '출근 중';
+      } else if (todayRecords.length > 0) {
+        statusLabel = '퇴근 상태';
+      }
+
+      const latestCheckInTime =
+        todayRecords
+          .map((record) => record.checkInTime)
+          .filter(Boolean)
+          .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] ||
+        null;
+
+      return {
+        userId: user.id,
+        name: user.name,
+        studentId: user.studentId,
+        statusLabel,
+        dailyWorkDurationMinutes: dailyMinutes,
+        dailyWorkDurationText: minutesToText(dailyMinutes),
+        weeklyWorkDurationMinutes: weeklyMinutes,
+        weeklyWorkDurationText: minutesToText(weeklyMinutes),
+        todayRecordCount: todayRecords.length,
+        latestCheckInTime
+      };
+    });
+
+    summaries.sort((a, b) => {
+      const statusPriority = {
+        '출근 중': 0,
+        '퇴근 상태': 1,
+        '출근 전': 2
+      };
+
+      const priorityA = statusPriority[a.statusLabel] ?? 99;
+      const priorityB = statusPriority[b.statusLabel] ?? 99;
+
+      if (priorityA !== priorityB) return priorityA - priorityB;
+
+      const bTime = new Date(b.latestCheckInTime || 0).getTime();
+      const aTime = new Date(a.latestCheckInTime || 0).getTime();
+
+      if (bTime !== aTime) return bTime - aTime;
+
+      return a.name.localeCompare(b.name, 'ko-KR');
+    });
+
+    return res.json({
+      today,
+      summaries
+    });
+  } catch (error) {
+    return handleServerError(res, error, '관리자 오늘 근무 요약 조회');
   }
 });
 

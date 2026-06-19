@@ -72,6 +72,10 @@ export const api = {
     return request(`/admin/records${queryString ? `?${queryString}` : ''}`);
   },
 
+  getAdminTodaySummary() {
+    return request('/admin/today-summary');
+  },
+
   getAdminEmployees() {
     return request('/admin/employees');
   },

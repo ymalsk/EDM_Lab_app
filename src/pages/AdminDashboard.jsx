@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
 import Header from '../components/Header.jsx';
-import { formatTime } from '../utils.js';
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
@@ -15,12 +14,11 @@ export default function AdminDashboard() {
     }
   }, []);
 
-  const [records, setRecords] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [settings, setSettings] = useState(null);
 
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filterDate, setFilterDate] = useState('');
+  const [todaySummary, setTodaySummary] = useState([]);
+  const [today, setToday] = useState('');
 
   const [employeeForm, setEmployeeForm] = useState({
     name: '',
@@ -42,13 +40,11 @@ export default function AdminDashboard() {
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const loadRecords = async () => {
-    const data = await api.getAdminRecords({
-      query: searchQuery,
-      date: filterDate
-    });
+  const loadTodaySummary = async () => {
+    const data = await api.getAdminTodaySummary();
 
-    setRecords(Array.isArray(data.records) ? data.records : []);
+    setToday(data.today || '');
+    setTodaySummary(Array.isArray(data.summaries) ? data.summaries : []);
   };
 
   const loadEmployees = async () => {
@@ -68,9 +64,10 @@ export default function AdminDashboard() {
 
   const loadAll = async () => {
     setLoading(true);
+    setMessage('');
 
     try {
-      await Promise.all([loadRecords(), loadEmployees(), loadSettings()]);
+      await Promise.all([loadTodaySummary(), loadEmployees(), loadSettings()]);
     } catch (error) {
       setMessage(error.message);
     } finally {
@@ -87,12 +84,6 @@ export default function AdminDashboard() {
     loadAll();
   }, []);
 
-  useEffect(() => {
-    if (!admin) return;
-
-    loadRecords().catch((error) => setMessage(error.message));
-  }, [searchQuery, filterDate]);
-
   const handleLogout = () => {
     localStorage.removeItem('currentAdmin');
     navigate('/admin/login');
@@ -104,13 +95,14 @@ export default function AdminDashboard() {
 
     try {
       const data = await api.createEmployee(employeeForm);
+
       setMessage(data.message || '직원이 등록되었습니다.');
       setEmployeeForm({
         name: '',
         studentId: ''
       });
 
-      await loadEmployees();
+      await Promise.all([loadEmployees(), loadTodaySummary()]);
     } catch (error) {
       setMessage(error.message);
     }
@@ -137,10 +129,11 @@ export default function AdminDashboard() {
 
     try {
       const data = await api.updateEmployee(employeeId, editingForm);
+
       setMessage(data.message || '직원 정보가 수정되었습니다.');
       cancelEditEmployee();
 
-      await Promise.all([loadEmployees(), loadRecords()]);
+      await Promise.all([loadEmployees(), loadTodaySummary()]);
     } catch (error) {
       setMessage(error.message);
     }
@@ -157,9 +150,10 @@ export default function AdminDashboard() {
 
     try {
       const data = await api.deleteEmployee(employeeId);
+
       setMessage(data.message || '직원이 삭제되었습니다.');
 
-      await Promise.all([loadEmployees(), loadRecords()]);
+      await Promise.all([loadEmployees(), loadTodaySummary()]);
     } catch (error) {
       setMessage(error.message);
     }
@@ -171,6 +165,7 @@ export default function AdminDashboard() {
 
     try {
       const data = await api.updateAdminSettings(settingsForm);
+
       setMessage(data.message || '관리자 계정 설정이 수정되었습니다.');
 
       setSettings(data.settings || null);
@@ -192,16 +187,30 @@ export default function AdminDashboard() {
         <div>
           <p className="eyebrow">Admin Dashboard</p>
           <h2>{admin?.name || '관리자'}님, 안녕하세요.</h2>
-          <p className="muted">직원 등록, 출퇴근 기록 조회, 관리자 계정 설정을 관리합니다.</p>
+          <p className="muted">
+            직원 등록, 직원 목록, 당일 근무 현황, 관리자 계정 설정을 관리합니다.
+          </p>
         </div>
 
-        <button className="outline-button danger-outline" type="button" onClick={handleLogout}>
+        <button
+          className="outline-button danger-outline"
+          type="button"
+          onClick={handleLogout}
+        >
           로그아웃
         </button>
       </section>
 
       {message && (
-        <p className={`alert ${message.includes('되었습니다') || message.includes('수정') || message.includes('삭제') ? 'success' : 'error'}`}>
+        <p
+          className={`alert ${
+            message.includes('되었습니다') ||
+            message.includes('수정') ||
+            message.includes('삭제')
+              ? 'success'
+              : 'error'
+          }`}
+        >
           {message}
         </p>
       )}
@@ -382,7 +391,9 @@ export default function AdminDashboard() {
                         )}
                       </td>
 
-                      <td>{employee.createdAt ? employee.createdAt.slice(0, 10) : '-'}</td>
+                      <td>
+                        {employee.createdAt ? employee.createdAt.slice(0, 10) : '-'}
+                      </td>
 
                       <td>
                         <div className="table-actions">
@@ -434,80 +445,60 @@ export default function AdminDashboard() {
         </div>
       </section>
 
-      <section className="table-card">
+      <section className="table-card admin-today-summary-section">
         <div className="section-title-row table-title-row">
           <div>
-            <p className="eyebrow">Attendance Records</p>
-            <h2>전체 출퇴근 기록</h2>
+            <p className="eyebrow">Today Summary</p>
+            <h2>직원별 당일 근무 현황</h2>
+            <p className="muted">{today} 기준</p>
           </div>
 
-          {loading && <p className="muted">불러오는 중...</p>}
+          <Link className="outline-button" to="/admin/records">
+            전체 출퇴근 기록 보기
+          </Link>
         </div>
 
-        <div className="filter-row">
-          <input
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="직원 이름 또는 학번 검색"
-          />
-
-          <input
-            type="date"
-            value={filterDate}
-            onChange={(event) => setFilterDate(event.target.value)}
-          />
-
-          <button
-            className="outline-button"
-            type="button"
-            onClick={() => {
-              setSearchQuery('');
-              setFilterDate('');
-            }}
-          >
-            필터 초기화
-          </button>
-        </div>
+        {loading && <p className="muted">불러오는 중...</p>}
 
         <div className="responsive-table">
           <table>
             <thead>
               <tr>
-                <th>직원 이름</th>
+                <th>이름</th>
                 <th>학번</th>
-                <th>날짜</th>
-                <th>회차</th>
-                <th>출근 시간</th>
-                <th>퇴근 시간</th>
-                <th>총 근로시간</th>
                 <th>상태</th>
-                <th>주간 근로시간</th>
+                <th>당일 총 근무시간</th>
+                <th>주간 누적 근로시간</th>
               </tr>
             </thead>
 
             <tbody>
-              {records.length === 0 ? (
+              {todaySummary.length === 0 ? (
                 <tr>
-                  <td colSpan="9" className="empty-cell">
-                    출퇴근 기록이 없습니다.
+                  <td colSpan="5" className="empty-cell">
+                    등록된 직원이 없습니다.
                   </td>
                 </tr>
               ) : (
-                records.map((record) => (
-                  <tr key={record.id}>
-                    <td>{record.employeeName}</td>
-                    <td>{record.studentId}</td>
-                    <td>{record.date}</td>
-                    <td>{record.sessionLabel || `${record.sessionOrder || 1}차`}</td>
-                    <td>{formatTime(record.checkInTime)}</td>
-                    <td>{record.checkOutTime ? formatTime(record.checkOutTime) : '미퇴근'}</td>
-                    <td>{record.workDurationText}</td>
+                todaySummary.map((item) => (
+                  <tr key={item.userId}>
+                    <td>{item.name}</td>
+                    <td>{item.studentId}</td>
                     <td>
-                      <span className={`status-pill ${record.status}`}>
-                        {record.statusLabel}
+                      <span
+                        className={`summary-status ${
+                          item.statusLabel === '출근 중'
+                            ? 'working'
+                            : item.statusLabel === '퇴근 상태'
+                              ? 'done'
+                              : 'ready'
+                        }`}
+                      >
+                        {item.statusLabel}
                       </span>
                     </td>
-                    <td>{record.weeklyWorkDurationText}</td>
+                    <td>{item.dailyWorkDurationText}</td>
+                    <td>{item.weeklyWorkDurationText}</td>
                   </tr>
                 ))
               )}

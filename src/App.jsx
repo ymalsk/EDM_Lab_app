@@ -4,6 +4,7 @@ import EmployeeHome from './pages/EmployeeHome.jsx';
 import EmployeeRecords from './pages/EmployeeRecords.jsx';
 import AdminLogin from './pages/AdminLogin.jsx';
 import AdminDashboard from './pages/AdminDashboard.jsx';
+import AdminRecords from './pages/AdminRecords.jsx';
 
 function RequireEmployee({ children }) {
   const employee = localStorage.getItem('currentEmployee');
@@ -45,6 +46,7 @@ export default function App() {
           </RequireAdmin>
         }
       />
+      <Route path="/admin/records" element={<AdminRecords />} />
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
   );

@@ -1061,3 +1061,33 @@ tr:hover td {
     align-items: center;
   }
 }
+
+.admin-today-summary-section {
+  margin-top: 32px;
+}
+
+.summary-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 72px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+.summary-status.working {
+  color: #075985;
+  background: #e0f2fe;
+}
+
+.summary-status.done {
+  color: #1d4ed8;
+  background: #dbeafe;
+}
+
+.summary-status.ready {
+  color: #475467;
+  background: #f2f4f7;
+}
