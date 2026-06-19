@@ -260,7 +260,7 @@ export default function AdminDashboard() {
                     name: event.target.value
                   }))
                 }
-                placeholder="예: 김유민"
+                placeholder="예: 티노"
               />
             </label>
 
@@ -274,7 +274,7 @@ export default function AdminDashboard() {
                     studentId: event.target.value
                   }))
                 }
-                placeholder="예: 20261234"
+                placeholder="예: 202616XXXX"
               />
             </label>
 
