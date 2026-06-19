@@ -3,6 +3,7 @@
 // 기존 로컬 db.json(fs 기반) 저장 방식을 제거하고 Supabase에 데이터를 저장한다.
 
 import { createClient } from '@supabase/supabase-js';
+import ws from 'ws';
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -15,7 +16,11 @@ if (!supabaseUrl || !supabaseServiceRoleKey) {
 
 // service role key는 서버에서만 사용해야 한다.
 // 절대 src/ 프론트엔드 코드에 넣으면 안 된다.
-export const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
+export const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
+  realtime: {
+    transport: ws
+  }
+});
 
 // Supabase snake_case → 기존 프로젝트 camelCase 형태로 변환
 function mapUserFromDb(user) {
