@@ -50,33 +50,6 @@ function getStatusLabel(record) {
   return '미완료';
 }
 
-function calculateWeeklyMinutes(records, userId, date) {
-  const { start, end } = getWeekRange(date);
-
-  return records
-    .filter((record) => record.userId === userId)
-    .filter((record) => record.date >= start && record.date <= end)
-    .reduce((sum, record) => sum + (record.workDurationMinutes || 0), 0);
-}
-
-function enrichRecord(record, user, allRecords) {
-  const weeklyMinutes = calculateWeeklyMinutes(
-    allRecords,
-    record.userId,
-    record.date
-  );
-
-  return {
-    ...record,
-    employeeName: user?.name || '알 수 없음',
-    studentId: user?.studentId || '-',
-    statusLabel: getStatusLabel(record),
-    workDurationText: minutesToText(record.workDurationMinutes || 0),
-    weeklyWorkDurationMinutes: weeklyMinutes,
-    weeklyWorkDurationText: minutesToText(weeklyMinutes)
-  };
-}
-
 function validateEmployeeInput({ name, studentId }) {
   if (!name || !studentId) return '이름과 학번을 모두 입력해주세요.';
   if (String(studentId).toLowerCase() === 'admin') {
@@ -93,6 +66,214 @@ function handleServerError(res, error, label = '요청 처리') {
     message: `${label} 중 오류가 발생했습니다.`,
     detail: error.message
   });
+}
+
+function parseYmd(dateString) {
+  const [year, month, day] = String(dateString).split('-').map(Number);
+  return { year, month, day };
+}
+
+function formatKstDate(date) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(date);
+}
+
+function createKstDateTime(dateString, hour = 0, minute = 0, second = 0, millisecond = 0) {
+  const { year, month, day } = parseYmd(dateString);
+
+  // KST는 UTC+9이므로 UTC 기준으로 9시간을 뺀 Date를 만든다.
+  return new Date(Date.UTC(year, month - 1, day, hour - 9, minute, second, millisecond));
+}
+
+function getKstStartOfDay(dateString) {
+  return createKstDateTime(dateString, 0, 0, 0, 0);
+}
+
+function getKstEndOfDay(dateString) {
+  return createKstDateTime(dateString, 23, 59, 59, 0);
+}
+
+function addDaysToYmd(dateString, days) {
+  const base = getKstStartOfDay(dateString);
+  base.setUTCDate(base.getUTCDate() + days);
+  return formatKstDate(base);
+}
+
+function calculateDurationMinutes(startTime, endTime) {
+  if (!startTime || !endTime) return 0;
+
+  const start = new Date(startTime);
+  const end = new Date(endTime);
+  const diffMs = end.getTime() - start.getTime();
+
+  return Math.max(0, Math.floor(diffMs / 1000 / 60));
+}
+
+function getNextSessionOrder(records, userId, date) {
+  const sessionOrders = records
+    .filter((record) => record.userId === userId && record.date === date)
+    .map((record) => Number(record.sessionOrder || 1));
+
+  if (sessionOrders.length === 0) return 1;
+
+  return Math.max(...sessionOrders) + 1;
+}
+
+function getOpenRecord(records, userId) {
+  return records
+    .filter((record) => record.userId === userId)
+    .filter((record) => record.status === 'checked-in' && !record.checkOutTime)
+    .sort((a, b) => new Date(b.checkInTime).getTime() - new Date(a.checkInTime).getTime())[0] || null;
+}
+
+function getDateRecords(records, userId, date) {
+  return records
+    .filter((record) => record.userId === userId && record.date === date)
+    .sort((a, b) => {
+      const orderA = Number(a.sessionOrder || 1);
+      const orderB = Number(b.sessionOrder || 1);
+
+      if (orderA !== orderB) return orderA - orderB;
+
+      return new Date(a.checkInTime || 0).getTime() - new Date(b.checkInTime || 0).getTime();
+    });
+}
+
+function getDailyStatusLabel(records) {
+  if (!records.length) return '';
+
+  if (records.some((record) => record.status === 'incomplete')) {
+    return '미완료';
+  }
+
+  if (records.some((record) => record.status === 'checked-in' || !record.checkOutTime)) {
+    return '미퇴근';
+  }
+
+  if (records.every((record) => record.status === 'checked-out')) {
+    return '퇴근 완료';
+  }
+
+  return '미완료';
+}
+
+function getDailyTotalMinutes(records) {
+  return records.reduce((sum, record) => {
+    return sum + (record.workDurationMinutes || 0);
+  }, 0);
+}
+
+function calculateWeeklyMinutes(records, userId, date) {
+  const { start, end } = getWeekRange(date);
+
+  return records
+    .filter((record) => record.userId === userId)
+    .filter((record) => record.date >= start && record.date <= end)
+    .reduce((sum, record) => sum + (record.workDurationMinutes || 0), 0);
+}
+
+function enrichRecord(record, user, allRecords) {
+  const weeklyMinutes = calculateWeeklyMinutes(allRecords, record.userId, record.date);
+  const sessionOrder = Number(record.sessionOrder || 1);
+
+  return {
+    ...record,
+    sessionOrder,
+    sessionLabel: `${sessionOrder}차`,
+    employeeName: user?.name || '알 수 없음',
+    studentId: user?.studentId || '-',
+    statusLabel: getStatusLabel(record),
+    workDurationText: minutesToText(record.workDurationMinutes || 0),
+    weeklyWorkDurationMinutes: weeklyMinutes,
+    weeklyWorkDurationText: minutesToText(weeklyMinutes)
+  };
+}
+
+function buildDailySummary(records, userId, date) {
+  const dateRecords = getDateRecords(records, userId, date);
+  const totalMinutes = getDailyTotalMinutes(dateRecords);
+
+  return {
+    date,
+    recordCount: dateRecords.length,
+    totalMinutes,
+    totalText: minutesToText(totalMinutes),
+    statusLabel: getDailyStatusLabel(dateRecords),
+    records: dateRecords
+  };
+}
+
+// 자정을 넘긴 미퇴근 기록을 날짜별로 자동 분리한다.
+// 예: 6/19 22:00 출근 상태에서 6/20에 접근하면
+// 6/19 22:00~23:59:59 퇴근 완료 + 6/20 00:00 미퇴근 기록으로 분리한다.
+function normalizeOpenRecordsForUser(db, userId, targetDate) {
+  let changed = false;
+  let guard = 0;
+
+  while (guard < 370) {
+    guard += 1;
+
+    const openRecord = db.attendanceRecords
+      .filter((record) => record.userId === userId)
+      .filter((record) => record.status === 'checked-in' && !record.checkOutTime)
+      .filter((record) => record.date < targetDate)
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)))[0];
+
+    if (!openRecord) break;
+
+    const nextDate = addDaysToYmd(openRecord.date, 1);
+    const endOfDay = getKstEndOfDay(openRecord.date);
+    const startOfNextDay = getKstStartOfDay(nextDate);
+
+    openRecord.checkOutTime = endOfDay.toISOString();
+    openRecord.workDurationMinutes = calculateDurationMinutes(
+      openRecord.checkInTime,
+      openRecord.checkOutTime
+    );
+    openRecord.status = 'checked-out';
+    openRecord.updatedAt = new Date().toISOString();
+
+    const nextRecord = {
+      id: randomUUID(),
+      userId,
+      date: nextDate,
+      sessionOrder: getNextSessionOrder(db.attendanceRecords, userId, nextDate),
+      checkInTime: startOfNextDay.toISOString(),
+      checkOutTime: null,
+      workDurationMinutes: 0,
+      status: 'checked-in',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    db.attendanceRecords.push(nextRecord);
+    changed = true;
+  }
+
+  if (guard >= 370) {
+    throw new Error('자정 초과 근무 자동 분리 처리 중 반복 제한을 초과했습니다.');
+  }
+
+  return changed;
+}
+
+function normalizeOpenRecordsForAllUsers(db, targetDate) {
+  let changed = false;
+
+  const employeeIds = db.users
+    .filter((user) => user.role === 'employee')
+    .map((user) => user.id);
+
+  employeeIds.forEach((userId) => {
+    const userChanged = normalizeOpenRecordsForUser(db, userId, targetDate);
+    if (userChanged) changed = true;
+  });
+
+  return changed;
 }
 
 app.get('/api/health', (req, res) => {
@@ -140,7 +321,7 @@ app.post('/api/auth/employee', async (req, res) => {
   }
 });
 
-// 관리자 로그인: 관리자 페이지에서 수정한 계정 정보로 로그인한다.
+// 관리자 로그인
 app.post('/api/auth/admin', async (req, res) => {
   try {
     const adminId = String(req.body.adminId || '').trim();
@@ -196,24 +377,38 @@ app.get('/api/employee/:userId/today', async (req, res) => {
       });
     }
 
-    const record =
-      db.attendanceRecords.find(
-        (item) => item.userId === userId && item.date === date
-      ) || null;
+    const changed = normalizeOpenRecordsForUser(db, userId, date);
+    if (changed) await writeDb(db);
+
+    const todayRecords = getDateRecords(db.attendanceRecords, userId, date);
+    const enrichedRecords = todayRecords.map((record) =>
+      enrichRecord(record, user, db.attendanceRecords)
+    );
+
+    const currentOpenRecord = getOpenRecord(db.attendanceRecords, userId);
+    const dailyWorkDurationMinutes = getDailyTotalMinutes(todayRecords);
 
     return res.json({
       today: date,
-      record: record ? enrichRecord(record, user, db.attendanceRecords) : null
+      records: enrichedRecords,
+      record: enrichedRecords[enrichedRecords.length - 1] || null,
+      currentOpenRecord: currentOpenRecord
+        ? enrichRecord(currentOpenRecord, user, db.attendanceRecords)
+        : null,
+      dailyWorkDurationMinutes,
+      dailyWorkDurationText: minutesToText(dailyWorkDurationMinutes),
+      statusLabel: getDailyStatusLabel(todayRecords)
     });
   } catch (error) {
     return handleServerError(res, error, '오늘 기록 조회');
   }
 });
 
-// 출근 처리: 같은 날짜에 중복 출근을 막는다.
+// 출근 처리: 현재 미퇴근 기록이 없으면 언제든 재출근 가능
 app.post('/api/attendance/check-in', async (req, res) => {
   try {
     const { userId } = req.body;
+    const { now, date } = getKstNow();
 
     const db = await readDb();
 
@@ -227,16 +422,15 @@ app.post('/api/attendance/check-in', async (req, res) => {
       });
     }
 
-    const { now, date } = getKstNow();
+    const changed = normalizeOpenRecordsForUser(db, userId, date);
+    if (changed) await writeDb(db);
 
-    const existing = db.attendanceRecords.find(
-      (record) => record.userId === userId && record.date === date
-    );
+    const openRecord = getOpenRecord(db.attendanceRecords, userId);
 
-    if (existing) {
+    if (openRecord) {
       return res.status(409).json({
-        message: '이미 출근 처리되었습니다.',
-        record: enrichRecord(existing, user, db.attendanceRecords)
+        message: '이미 출근 상태입니다. 먼저 퇴근 처리해주세요.',
+        record: enrichRecord(openRecord, user, db.attendanceRecords)
       });
     }
 
@@ -244,6 +438,7 @@ app.post('/api/attendance/check-in', async (req, res) => {
       id: randomUUID(),
       userId,
       date,
+      sessionOrder: getNextSessionOrder(db.attendanceRecords, userId, date),
       checkInTime: now.toISOString(),
       checkOutTime: null,
       workDurationMinutes: 0,
@@ -265,10 +460,11 @@ app.post('/api/attendance/check-in', async (req, res) => {
   }
 });
 
-// 퇴근 처리: 출근 기록이 있을 때만 가능하며 근로시간을 자동 계산한다.
+// 퇴근 처리: 가장 최근 미퇴근 기록을 퇴근 처리
 app.post('/api/attendance/check-out', async (req, res) => {
   try {
     const { userId } = req.body;
+    const { now, date } = getKstNow();
 
     const db = await readDb();
 
@@ -282,22 +478,15 @@ app.post('/api/attendance/check-out', async (req, res) => {
       });
     }
 
-    const { now, date } = getKstNow();
+    const changed = normalizeOpenRecordsForUser(db, userId, date);
 
-    const record = db.attendanceRecords.find(
-      (item) => item.userId === userId && item.date === date
-    );
+    let record = getOpenRecord(db.attendanceRecords, userId);
 
     if (!record) {
-      return res.status(404).json({
-        message: '출근 기록이 없습니다.'
-      });
-    }
+      if (changed) await writeDb(db);
 
-    if (record.checkOutTime) {
-      return res.status(409).json({
-        message: '이미 퇴근 처리되었습니다.',
-        record: enrichRecord(record, user, db.attendanceRecords)
+      return res.status(404).json({
+        message: '현재 출근 상태가 아닙니다.'
       });
     }
 
@@ -313,11 +502,11 @@ app.post('/api/attendance/check-out', async (req, res) => {
       });
     }
 
-    const diffMs = now.getTime() - new Date(record.checkInTime).getTime();
-    const minutes = Math.max(0, Math.floor(diffMs / 1000 / 60));
-
     record.checkOutTime = now.toISOString();
-    record.workDurationMinutes = minutes;
+    record.workDurationMinutes = calculateDurationMinutes(
+      record.checkInTime,
+      record.checkOutTime
+    );
     record.status = 'checked-out';
     record.updatedAt = new Date().toISOString();
 
@@ -338,6 +527,7 @@ app.get('/api/employee/:userId/records', async (req, res) => {
     const { userId } = req.params;
     const year = Number(req.query.year);
     const month = Number(req.query.month);
+    const { date: today } = getKstNow();
 
     if (!year || !month || month < 1 || month > 12) {
       return res.status(400).json({
@@ -357,6 +547,9 @@ app.get('/api/employee/:userId/records', async (req, res) => {
       });
     }
 
+    const changed = normalizeOpenRecordsForUser(db, userId, today);
+    if (changed) await writeDb(db);
+
     const { start, end } = getMonthRange(year, month);
 
     const records = db.attendanceRecords
@@ -366,7 +559,16 @@ app.get('/api/employee/:userId/records', async (req, res) => {
           record.date >= start &&
           record.date <= end
       )
-      .sort((a, b) => a.date.localeCompare(b.date))
+      .sort((a, b) => {
+        if (a.date !== b.date) return a.date.localeCompare(b.date);
+
+        const orderA = Number(a.sessionOrder || 1);
+        const orderB = Number(b.sessionOrder || 1);
+
+        if (orderA !== orderB) return orderA - orderB;
+
+        return new Date(a.checkInTime || 0).getTime() - new Date(b.checkInTime || 0).getTime();
+      })
       .map((record) => enrichRecord(record, user, db.attendanceRecords));
 
     const monthlyWorkDurationMinutes = records.reduce(
@@ -374,11 +576,31 @@ app.get('/api/employee/:userId/records', async (req, res) => {
       0
     );
 
+    const dailySummaryMap = new Map();
+
+    records.forEach((record) => {
+      if (!dailySummaryMap.has(record.date)) {
+        const rawDateRecords = getDateRecords(db.attendanceRecords, userId, record.date);
+
+        dailySummaryMap.set(record.date, {
+          date: record.date,
+          recordCount: rawDateRecords.length,
+          totalMinutes: getDailyTotalMinutes(rawDateRecords),
+          totalText: minutesToText(getDailyTotalMinutes(rawDateRecords)),
+          statusLabel: getDailyStatusLabel(rawDateRecords)
+        });
+      }
+    });
+
+    const dailySummaries = Array.from(dailySummaryMap.values())
+      .sort((a, b) => a.date.localeCompare(b.date));
+
     return res.json({
       year,
       month,
       employee: sanitizeUser(user),
       records,
+      dailySummaries,
       monthlyWorkDurationMinutes,
       monthlyWorkDurationText: minutesToText(monthlyWorkDurationMinutes)
     });
@@ -387,13 +609,17 @@ app.get('/api/employee/:userId/records', async (req, res) => {
   }
 });
 
-// 관리자 전체 기록 조회: 직원 이름/학번 검색, 날짜 필터 지원
+// 관리자 전체 기록 조회
 app.get('/api/admin/records', async (req, res) => {
   try {
     const query = String(req.query.query || '').trim().toLowerCase();
-    const date = String(req.query.date || '').trim();
+    const filterDate = String(req.query.date || '').trim();
+    const { date: today } = getKstNow();
 
     const db = await readDb();
+
+    const changed = normalizeOpenRecordsForAllUsers(db, today);
+    if (changed) await writeDb(db);
 
     const employeeUsers = db.users.filter((user) => user.role === 'employee');
     const usersById = new Map(employeeUsers.map((user) => [user.id, user]));
@@ -412,16 +638,22 @@ app.get('/api/admin/records', async (req, res) => {
       });
     }
 
-    if (date) {
-      records = records.filter((record) => record.date === date);
+    if (filterDate) {
+      records = records.filter((record) => record.date === filterDate);
     }
 
     records.sort((a, b) => {
-      if (a.date === b.date) {
-        return a.employeeName.localeCompare(b.employeeName, 'ko-KR');
-      }
+      if (a.date !== b.date) return b.date.localeCompare(a.date);
 
-      return b.date.localeCompare(a.date);
+      const nameCompare = a.employeeName.localeCompare(b.employeeName, 'ko-KR');
+      if (nameCompare !== 0) return nameCompare;
+
+      const checkInCompare =
+        new Date(a.checkInTime || 0).getTime() - new Date(b.checkInTime || 0).getTime();
+
+      if (checkInCompare !== 0) return checkInCompare;
+
+      return Number(a.sessionOrder || 1) - Number(b.sessionOrder || 1);
     });
 
     return res.json({
@@ -440,16 +672,7 @@ app.get('/api/admin/employees', async (req, res) => {
     const employees = db.users
       .filter((user) => user.role === 'employee')
       .sort((a, b) => a.name.localeCompare(b.name, 'ko-KR'))
-      .map((user) => {
-        const recordCount = db.attendanceRecords.filter(
-          (record) => record.userId === user.id
-        ).length;
-
-        return {
-          ...sanitizeUser(user),
-          recordCount
-        };
-      });
+      .map((user) => sanitizeUser(user));
 
     return res.json({
       employees
@@ -563,7 +786,7 @@ app.put('/api/admin/employees/:id', async (req, res) => {
   }
 });
 
-// 관리자 직원 삭제: 직원 계정과 해당 직원의 출퇴근 기록을 함께 삭제한다.
+// 관리자 직원 삭제
 app.delete('/api/admin/employees/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -608,7 +831,7 @@ app.get('/api/admin/settings', async (req, res) => {
   }
 });
 
-// 관리자 계정 설정 수정: 현재 비밀번호 확인 후 ID/비밀번호를 변경한다.
+// 관리자 계정 설정 수정
 app.put('/api/admin/settings', async (req, res) => {
   try {
     const adminId = String(req.body.adminId || '').trim();

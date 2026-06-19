@@ -1,6 +1,6 @@
 // server/db.js
 // Vercel 배포용 Supabase DB 연결 파일
-// 기존 로컬 db.json(fs 기반) 저장 방식을 제거하고 Supabase에 데이터를 저장한다.
+// Supabase에 직원, 출퇴근 기록, 관리자 설정을 저장한다.
 
 import { createClient } from '@supabase/supabase-js';
 import ws from 'ws';
@@ -14,8 +14,8 @@ if (!supabaseUrl || !supabaseServiceRoleKey) {
   );
 }
 
-// service role key는 서버에서만 사용해야 한다.
-// 절대 src/ 프론트엔드 코드에 넣으면 안 된다.
+// service role key는 서버에서만 사용한다.
+// 절대 src/ 프론트엔드 코드에 넣지 않는다.
 export const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
   realtime: {
     transport: ws
@@ -39,9 +39,10 @@ function mapRecordFromDb(record) {
     id: record.id,
     userId: record.user_id,
     date: record.date,
+    sessionOrder: record.session_order || 1,
     checkInTime: record.check_in_time,
     checkOutTime: record.check_out_time,
-    workDurationMinutes: record.work_duration_minutes,
+    workDurationMinutes: record.work_duration_minutes || 0,
     status: record.status,
     createdAt: record.created_at,
     updatedAt: record.updated_at
@@ -56,17 +57,17 @@ function mapSettingsFromDb(settings) {
   };
 }
 
-// 기존 ensureDb()와 호환용 함수
-// Supabase에서는 테이블 생성은 SQL Editor에서 미리 해야 하므로 여기서는 초기 관리자 설정만 확인한다.
+// Supabase 테이블은 SQL Editor에서 미리 생성해야 한다.
+// 여기서는 초기 관리자 설정과 관리자 유저가 있는지만 확인한다.
 export async function ensureDb() {
-  const { data: settings, error } = await supabase
+  const { data: settings, error: settingsError } = await supabase
     .from('admin_settings')
     .select('*')
     .eq('id', 'main')
     .maybeSingle();
 
-  if (error) {
-    throw new Error(`관리자 설정 조회 실패: ${error.message}`);
+  if (settingsError) {
+    throw new Error(`관리자 설정 조회 실패: ${settingsError.message}`);
   }
 
   if (!settings) {
@@ -95,11 +96,15 @@ export async function ensureDb() {
   }
 
   if (!adminUser) {
-    const { data: currentSettings } = await supabase
+    const { data: currentSettings, error: currentSettingsError } = await supabase
       .from('admin_settings')
       .select('*')
       .eq('id', 'main')
       .single();
+
+    if (currentSettingsError) {
+      throw new Error(`현재 관리자 설정 조회 실패: ${currentSettingsError.message}`);
+    }
 
     const { error: insertAdminError } = await supabase
       .from('users')
@@ -115,8 +120,7 @@ export async function ensureDb() {
   }
 }
 
-// 기존 readDb()와 최대한 비슷하게 동작하도록 만든 함수
-// 기존 코드에서 const db = readDb(); 였다면 const db = await readDb(); 로 바꿔야 한다.
+// 기존 코드와 호환되도록 전체 DB 객체 형태로 반환한다.
 export async function readDb() {
   await ensureDb();
 
@@ -143,7 +147,8 @@ export async function readDb() {
     .from('attendance_records')
     .select('*')
     .order('date', { ascending: false })
-    .order('created_at', { ascending: false });
+    .order('session_order', { ascending: true })
+    .order('check_in_time', { ascending: true });
 
   if (recordsError) {
     throw new Error(`출퇴근 기록 조회 실패: ${recordsError.message}`);
@@ -156,9 +161,8 @@ export async function readDb() {
   };
 }
 
-// 기존 writeDb()와 호환용 함수
-// 단, Supabase에서는 전체 DB를 한 번에 덮어쓰기보다 개별 API에서 insert/update/delete 하는 방식이 더 좋다.
-// 그래도 기존 server/index.js 구조를 최대한 유지하기 위해 제공한다.
+// 기존 index.js 구조와 호환되도록 전체 DB 객체를 저장한다.
+// Supabase에서는 upsert 후, 배열에서 빠진 기존 데이터는 삭제되도록 보정한다.
 export async function writeDb(db) {
   if (!db || typeof db !== 'object') {
     throw new Error('저장할 DB 데이터가 올바르지 않습니다.');
@@ -189,7 +193,7 @@ export async function writeDb(db) {
       student_id: user.studentId,
       role: user.role || 'employee',
       created_at: user.createdAt || now,
-      updated_at: now
+      updated_at: user.updatedAt || now
     }));
 
     if (usersPayload.length > 0) {
@@ -200,6 +204,19 @@ export async function writeDb(db) {
       if (usersError) {
         throw new Error(`사용자 저장 실패: ${usersError.message}`);
       }
+
+      // db.users에서 제거된 사용자는 Supabase에서도 제거한다.
+      // 직원 삭제 기능이 실제 DB에 반영되도록 하기 위한 처리다.
+      const keepUserIds = usersPayload.map((user) => user.id);
+
+      const { error: deleteUsersError } = await supabase
+        .from('users')
+        .delete()
+        .not('id', 'in', `(${keepUserIds.join(',')})`);
+
+      if (deleteUsersError) {
+        throw new Error(`삭제된 사용자 반영 실패: ${deleteUsersError.message}`);
+      }
     }
   }
 
@@ -208,12 +225,13 @@ export async function writeDb(db) {
       id: record.id,
       user_id: record.userId,
       date: record.date,
+      session_order: record.sessionOrder || record.session_order || 1,
       check_in_time: record.checkInTime,
       check_out_time: record.checkOutTime || null,
       work_duration_minutes: record.workDurationMinutes || 0,
       status: record.status,
       created_at: record.createdAt || now,
-      updated_at: now
+      updated_at: record.updatedAt || now
     }));
 
     if (recordsPayload.length > 0) {
@@ -224,20 +242,54 @@ export async function writeDb(db) {
       if (recordsError) {
         throw new Error(`출퇴근 기록 저장 실패: ${recordsError.message}`);
       }
+
+      // db.attendanceRecords에서 제거된 기록은 Supabase에서도 제거한다.
+      // 직원 삭제 시 해당 직원의 기록이 함께 삭제되도록 하기 위한 처리다.
+      const keepRecordIds = recordsPayload.map((record) => record.id);
+
+      const { error: deleteRecordsError } = await supabase
+        .from('attendance_records')
+        .delete()
+        .not('id', 'in', `(${keepRecordIds.join(',')})`);
+
+      if (deleteRecordsError) {
+        throw new Error(`삭제된 출퇴근 기록 반영 실패: ${deleteRecordsError.message}`);
+      }
+    } else {
+      // 기록 배열이 비어 있으면 전체 출퇴근 기록을 삭제한다.
+      const { error: deleteAllRecordsError } = await supabase
+        .from('attendance_records')
+        .delete()
+        .neq('id', '00000000-0000-0000-0000-000000000000');
+
+      if (deleteAllRecordsError) {
+        throw new Error(`전체 출퇴근 기록 삭제 실패: ${deleteAllRecordsError.message}`);
+      }
     }
   }
 }
 
-// 개발 중 테스트 데이터를 초기화하고 싶을 때만 사용하는 함수
-// 운영 중에는 절대 호출하지 않는 것을 권장한다.
+// 개발 중 테스트 데이터를 초기화하고 싶을 때만 사용한다.
+// 운영 환경에서는 실행되지 않도록 막는다.
 export async function resetDbForDev() {
   if (process.env.NODE_ENV === 'production') {
     throw new Error('운영 환경에서는 DB 초기화를 실행할 수 없습니다.');
   }
 
-  await supabase.from('attendance_records').delete().neq('id', '');
-  await supabase.from('users').delete().neq('id', '');
-  await supabase.from('admin_settings').delete().neq('id', '');
+  await supabase
+    .from('attendance_records')
+    .delete()
+    .neq('id', '00000000-0000-0000-0000-000000000000');
+
+  await supabase
+    .from('users')
+    .delete()
+    .neq('id', '00000000-0000-0000-0000-000000000000');
+
+  await supabase
+    .from('admin_settings')
+    .delete()
+    .neq('id', 'main-delete-blocker');
 
   await ensureDb();
 }
