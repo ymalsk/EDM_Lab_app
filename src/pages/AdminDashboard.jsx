@@ -38,7 +38,17 @@ export default function AdminDashboard() {
   });
 
   const [message, setMessage] = useState('');
+  const [settingsMessage, setSettingsMessage] = useState('');
   const [loading, setLoading] = useState(false);
+
+  const isSuccessMessage = (text) => {
+    return (
+      text.includes('되었습니다') ||
+      text.includes('수정') ||
+      text.includes('등록') ||
+      text.includes('삭제')
+    );
+  };
 
   const loadTodaySummary = async () => {
     const data = await api.getAdminTodaySummary();
@@ -49,6 +59,7 @@ export default function AdminDashboard() {
 
   const loadEmployees = async () => {
     const data = await api.getAdminEmployees();
+
     setEmployees(Array.isArray(data.employees) ? data.employees : []);
   };
 
@@ -91,7 +102,9 @@ export default function AdminDashboard() {
 
   const handleCreateEmployee = async (event) => {
     event.preventDefault();
+
     setMessage('');
+    setSettingsMessage('');
 
     try {
       const data = await api.createEmployee(employeeForm);
@@ -109,6 +122,9 @@ export default function AdminDashboard() {
   };
 
   const startEditEmployee = (employee) => {
+    setMessage('');
+    setSettingsMessage('');
+
     setEditingEmployeeId(employee.id);
     setEditingForm({
       name: employee.name,
@@ -126,6 +142,7 @@ export default function AdminDashboard() {
 
   const handleUpdateEmployee = async (employeeId) => {
     setMessage('');
+    setSettingsMessage('');
 
     try {
       const data = await api.updateEmployee(employeeId, editingForm);
@@ -147,6 +164,7 @@ export default function AdminDashboard() {
     if (!confirmed) return;
 
     setMessage('');
+    setSettingsMessage('');
 
     try {
       const data = await api.deleteEmployee(employeeId);
@@ -161,21 +179,36 @@ export default function AdminDashboard() {
 
   const handleUpdateSettings = async (event) => {
     event.preventDefault();
+
     setMessage('');
+    setSettingsMessage('');
 
     try {
       const data = await api.updateAdminSettings(settingsForm);
 
-      setMessage(data.message || '관리자 계정 설정이 수정되었습니다.');
+      setSettingsMessage(data.message || '관리자 계정 설정이 수정되었습니다.');
 
       setSettings(data.settings || null);
+
       setSettingsForm({
         adminId: data.settings?.adminId || '',
         currentPassword: '',
         newPassword: ''
       });
+
+      const currentAdmin = JSON.parse(
+        sessionStorage.getItem('currentAdmin') || '{}'
+      );
+
+      sessionStorage.setItem(
+        'currentAdmin',
+        JSON.stringify({
+          ...currentAdmin,
+          name: data.admin?.name || currentAdmin.name || '관리자'
+        })
+      );
     } catch (error) {
-      setMessage(error.message);
+      setSettingsMessage(error.message);
     }
   };
 
@@ -202,15 +235,7 @@ export default function AdminDashboard() {
       </section>
 
       {message && (
-        <p
-          className={`alert ${
-            message.includes('되었습니다') ||
-            message.includes('수정') ||
-            message.includes('삭제')
-              ? 'success'
-              : 'error'
-          }`}
-        >
+        <p className={`alert ${isSuccessMessage(message) ? 'success' : 'error'}`}>
           {message}
         </p>
       )}
@@ -312,6 +337,16 @@ export default function AdminDashboard() {
               />
             </label>
 
+            {settingsMessage && (
+              <p
+                className={`alert ${
+                  isSuccessMessage(settingsMessage) ? 'success' : 'error'
+                }`}
+              >
+                {settingsMessage}
+              </p>
+            )}
+
             <button className="primary-button" type="submit">
               관리자 설정 저장
             </button>
@@ -392,7 +427,9 @@ export default function AdminDashboard() {
                       </td>
 
                       <td>
-                        {employee.createdAt ? employee.createdAt.slice(0, 10) : '-'}
+                        {employee.createdAt
+                          ? employee.createdAt.slice(0, 10)
+                          : '-'}
                       </td>
 
                       <td>
