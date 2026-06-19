@@ -75,7 +75,7 @@ export default function EmployeeHome() {
 
   return (
     <main className="page-shell">
-      <Header title="직원 메인" homePath="/employee" />
+      <Header title="직원 메인" mode="/employee" />
 
       <section className="hero-card">
         <div>

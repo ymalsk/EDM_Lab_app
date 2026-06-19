@@ -181,7 +181,7 @@ export default function AdminDashboard() {
 
   return (
     <main className="page-shell">
-      <Header title="관리자 페이지" homePath="/admin" />
+      <Header title="관리자 페이지" mode="admin" />
 
       <section className="hero-card">
         <div>

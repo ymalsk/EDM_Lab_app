@@ -30,7 +30,9 @@ export default function App() {
   return (
     <Routes>
       <Route path="/" element={<Navigate to="/login" replace />} />
+
       <Route path="/login" element={<EmployeeLogin />} />
+
       <Route
         path="/employee"
         element={
@@ -39,6 +41,7 @@ export default function App() {
           </RequireEmployee>
         }
       />
+
       <Route
         path="/employee/records"
         element={
@@ -47,7 +50,9 @@ export default function App() {
           </RequireEmployee>
         }
       />
+
       <Route path="/admin/login" element={<AdminLogin />} />
+
       <Route
         path="/admin"
         element={
@@ -56,7 +61,16 @@ export default function App() {
           </RequireAdmin>
         }
       />
-      <Route path="/admin/records" element={<AdminRecords />} />
+
+      <Route
+        path="/admin/records"
+        element={
+          <RequireAdmin>
+            <AdminRecords />
+          </RequireAdmin>
+        }
+      />
+
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
   );

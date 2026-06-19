@@ -922,6 +922,7 @@ app.get('/api/admin/settings', async (req, res) => {
 });
 
 // 관리자 계정 설정 수정
+// 관리자 계정 설정 수정
 app.put('/api/admin/settings', async (req, res) => {
   try {
     const adminId = String(req.body.adminId || '').trim();
@@ -934,6 +935,12 @@ app.put('/api/admin/settings', async (req, res) => {
       });
     }
 
+    if (!currentPassword) {
+      return res.status(400).json({
+        message: '현재 관리자 비밀번호를 입력해주세요.'
+      });
+    }
+
     const db = await readDb();
 
     if (!db.settings) {
@@ -942,7 +949,15 @@ app.put('/api/admin/settings', async (req, res) => {
       });
     }
 
-    if (currentPassword !== db.settings.adminPassword) {
+    const savedPassword = String(db.settings.adminPassword || '').trim();
+
+    if (!savedPassword) {
+      return res.status(500).json({
+        message: '관리자 비밀번호 정보가 DB에서 정상적으로 로드되지 않았습니다. server/db.js의 admin_password 매핑을 확인해주세요.'
+      });
+    }
+
+    if (currentPassword !== savedPassword) {
       return res.status(401).json({
         message: '현재 관리자 비밀번호가 올바르지 않습니다.'
       });
@@ -964,10 +979,12 @@ app.put('/api/admin/settings', async (req, res) => {
       db.settings.adminPassword = newPassword;
     }
 
+    db.settings.updatedAt = new Date().toISOString();
+
     const admin = db.users.find((user) => user.role === 'admin');
 
     if (admin) {
-      admin.name = db.settings.adminName;
+      admin.name = db.settings.adminName || '관리자';
       admin.studentId = adminId;
       admin.updatedAt = new Date().toISOString();
     }

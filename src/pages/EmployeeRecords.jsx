@@ -150,7 +150,7 @@ export default function EmployeeRecords() {
 
   return (
     <main className="page-shell">
-      <Header title="출근 기록" homePath="/employee" />
+      <Header title="출근 기록" mode="/employee" />
 
       <section className="hero-card">
         <div>

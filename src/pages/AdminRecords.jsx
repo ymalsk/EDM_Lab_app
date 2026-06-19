@@ -56,7 +56,7 @@ export default function AdminRecords() {
 
   return (
     <main className="page-shell">
-      <Header title="전체 출퇴근 기록" homePath="/admin" />
+      <Header title="전체 출퇴근 기록" mode="admin" />
 
       <section className="hero-card">
         <div>
